@@ -1,12 +1,16 @@
 package main
 
 import (
+	"archive/tar"
 	"bufio"
 	"bytes"
-	"context"
+	"compress/gzip"
+	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,30 +18,89 @@ import (
 	"strings"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	git "gopkg.in/src-d/go-git.v4"
 	"gopkg.in/src-d/go-git.v4/plumbing"
 	"gopkg.in/src-d/go-git.v4/plumbing/object"
 )
 
-type Commit struct {
-	ProjectPath string `bson:"project_path"`
-	ProjectName string `bson:"project_name"`
-	projectPath string `bson:"project_path"`
-	Hash        string `bson:"hash"`
-	Time        int64  `bson:"time"`
-	ID          int    `bson:"id"`
-	// Files       map[string]string `bson:"files"`
+type ErrorResponse struct {
+	Message string `json:"message"`
 }
 
-type Commits []Commit
+type ErrorsResponse []ErrorResponse
+
+type UploadResponse struct {
+	URL string `json:"url"`
+}
+
+type UploadsResponse []UploadResponse
+
+// type Commit struct {
+// 	ProjectPath string `bson:"project_path"`
+// 	ProjectName string `bson:"project_name"`
+// 	projectPath string `bson:"project_path"`
+// 	Hash        string `bson:"hash"`
+// 	Time        int64  `bson:"time"`
+// 	ID          int    `bson:"id"`
+// 	// Files       map[string]string `bson:"files"`
+// }
+
+// type Commits []Commit
 
 var liveStart bool
 
 const CUI_LOG = ".cui.log"
-const LIVE_CODING_PATH = "/Users/kitamurataku/work/liveCoding"
+
+// const LIVE_CODING_PATH = "/Users/kitamurataku/work/liveCoding"
+
+// Copyright 2017 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+func compress(src string, buf io.Writer) error {
+	// tar > gzip > buf
+	zr := gzip.NewWriter(buf)
+	tw := tar.NewWriter(zr)
+
+	// walk through every file in the folder
+	filepath.Walk(src, func(file string, fi os.FileInfo, err error) error {
+		// generate tar header
+		header, err := tar.FileInfoHeader(fi, file)
+		if err != nil {
+			return err
+		}
+
+		// must provide real name
+		// (see https://golang.org/src/archive/tar/common.go?#L626)
+		header.Name = filepath.ToSlash(file)
+
+		// write header
+		if err := tw.WriteHeader(header); err != nil {
+			return err
+		}
+		// if not a dir, write file content
+		if !fi.IsDir() {
+			data, err := os.Open(file)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(tw, data); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	// produce tar
+	if err := tw.Close(); err != nil {
+		return err
+	}
+	// produce gzip
+	if err := zr.Close(); err != nil {
+		return err
+	}
+	//
+	return nil
+}
 
 func remove(strings []string, search string) []string {
 	result := []string{}
@@ -84,6 +147,7 @@ func liveCommandUsage(projectPath string) {
 func watch(r *git.Repository, projectPath string, couterHTMLPath string) error {
 	w, err := r.Worktree()
 	if err != nil {
+		fmt.Println(err)
 		return err
 	}
 
@@ -94,24 +158,18 @@ func watch(r *git.Repository, projectPath string, couterHTMLPath string) error {
 
 		time.Sleep(time.Second * 1)
 
-		// TODO: 対応があれば置き換え｡
-		// _, err := w.Add(".")
-		// CheckIfError(err)
-
-		// CheckIfError(err)
-
 		status, err := w.Status()
 		if err != nil {
-			continue
+			fmt.Println(err)
+			return err
 		}
 		// fmt.Println(status.String())
 
 		if len(status) != 0 {
-			cmd := exec.Command("git", "add", projectPath)
-			cmd.Dir = w.Filesystem.Root()
-			err = cmd.Run()
+			err = w.AddGlob(".")
 			if err != nil {
-				continue
+				fmt.Println(err)
+				return err
 			}
 
 			commit, err := w.Commit(strconv.FormatInt(time.Now().UnixNano(), 10), &git.CommitOptions{
@@ -120,82 +178,108 @@ func watch(r *git.Repository, projectPath string, couterHTMLPath string) error {
 				},
 			})
 			if err != nil {
-				continue
+				fmt.Println(err)
+				return err
 			}
 
 			w.Checkout(&git.CheckoutOptions{
 				Branch: plumbing.NewBranchReferenceName("master"),
 			})
 
-			obj, err := r.CommitObject(commit)
+			_, err = r.CommitObject(commit)
 			if err != nil {
-				continue
+				fmt.Println(err)
+				return err
 			}
 
-			ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-			client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
+			cIter, err := r.Log(&git.LogOptions{Order: git.LogOrderCommitterTime})
 			if err != nil {
-				continue
+				fmt.Println(err)
+				return err
 			}
-			defer client.Disconnect(ctx)
 
-			commitTime, err := strconv.ParseInt(obj.Message, 10, 64)
+			commitID := -1
+			err = cIter.ForEach(func(_ *object.Commit) error {
+				commitID++
+				return nil
+			})
 			if err != nil {
-				continue
+				fmt.Println(err)
+				return err
 			}
+			// fmt.Println(commitID)
 
-			commitCollection := client.Database("liveCoding").Collection("commit")
-
-			findOptions := options.Find()
-			findOptions.SetSort(bson.D{{"id", -1}}).SetLimit(1)
-			projectFilter := bson.M{"project_path": projectPath}
-			cur, err := commitCollection.Find(ctx, projectFilter, findOptions)
+			err, _ = createCounterHTML("ID: "+strconv.Itoa(commitID), couterHTMLPath)
 			if err != nil {
-				continue
+				fmt.Println(err)
+				return err
 			}
 
-			commitsStruct := Commits{}
+			// _, err = r.CommitObject(commit) 以下に貼り付ければライブモード
+			// ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+			// client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
+			// if err != nil {
+			// 	continue
+			// }
+			// defer client.Disconnect(ctx)
 
-			err = cur.All(ctx, &commitsStruct)
-			if err != nil {
-				continue
-			}
+			// commitTime, err := strconv.ParseInt(obj.Message, 10, 64)
+			// if err != nil {
+			// 	continue
+			// }
 
-			var commitStruct Commit
+			// commitCollection := client.Database("liveCoding").Collection("commit")
 
-			if len(commitsStruct) == 1 {
-				commitStruct = Commit{
-					ProjectPath: projectPath,
-					ProjectName: filepath.Base(projectPath),
-					Hash:        obj.Hash.String(),
-					Time:        commitTime,
-					ID:          commitsStruct[0].ID + 1,
-				}
+			// findOptions := options.Find()
+			// findOptions.SetSort(bson.D{{"id", -1}}).SetLimit(1)
+			// projectFilter := bson.M{"project_path": projectPath}
+			// cur, err := commitCollection.Find(ctx, projectFilter, findOptions)
+			// if err != nil {
+			// 	continue
+			// }
 
-				err, _ := createCounterHTML("ID: "+strconv.Itoa(commitsStruct[0].ID+1), couterHTMLPath)
-				if err != nil {
-					return err
-				}
-			} else {
-				commitStruct = Commit{
-					ProjectPath: projectPath,
-					ProjectName: filepath.Base(projectPath),
-					Hash:        obj.Hash.String(),
-					Time:        commitTime,
-					ID:          0,
-				}
+			// commitsStruct := Commits{}
 
-				err, _ := createCounterHTML("ID: 0", couterHTMLPath)
-				if err != nil {
-					fmt.Println(err)
-					return err
-				}
-			}
+			// err = cur.All(ctx, &commitsStruct)
+			// if err != nil {
+			// 	continue
+			// }
 
-			_, err = commitCollection.InsertOne(ctx, commitStruct)
-			if err != nil {
-				continue
-			}
+			// var commitStruct Commit
+
+			// if len(commitsStruct) == 1 {
+			// 	commitStruct = Commit{
+			// 		ProjectPath: projectPath,
+			// 		ProjectName: filepath.Base(projectPath),
+			// 		Hash:        obj.Hash.String(),
+			// 		Time:        commitTime,
+			// 		ID:          commitsStruct[0].ID + 1,
+			// 	}
+
+			// 	err, _ := createCounterHTML("ID: "+strconv.Itoa(commitsStruct[0].ID+1), couterHTMLPath)
+			// 	if err != nil {
+			// 		return err
+			// 	}
+			// } else {
+			// 	commitStruct = Commit{
+			// 		ProjectPath: projectPath,
+			// 		ProjectName: filepath.Base(projectPath),
+			// 		Hash:        obj.Hash.String(),
+			// 		Time:        commitTime,
+			// 		ID:          0,
+			// 	}
+
+			// 	err, _ := createCounterHTML("ID: 0", couterHTMLPath)
+			// 	if err != nil {
+			// 		fmt.Println(err)
+			// 		return err
+			// 	}
+			// }
+
+			// _, err = commitCollection.InsertOne(ctx, commitStruct)
+			// if err != nil {
+			// 	continue
+			// }
 
 		}
 	}
@@ -244,7 +328,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Println("Please open \"" + couterHTMLPath + "\" in your browser.")
+	fmt.Println("Please open \"file://" + couterHTMLPath + "\" in your browser.")
 	for {
 		pwd, err := os.Getwd()
 		if err != nil {
@@ -332,7 +416,7 @@ func main() {
 				} else if len(cmdSplit) == 3 {
 					secondCommandValue := cmdSplit[1]
 					thirdCommandValue := cmdSplit[2]
-					if secondCommandValue == "start" {
+					if secondCommandValue == "init" {
 						if liveStart {
 							writeCommandOut("live is already started.\n", projectPath, liveStart)
 							continue
@@ -371,7 +455,7 @@ func main() {
 						}
 
 						continue
-					} else if secondCommandValue == "resume" {
+					} else if secondCommandValue == "start" {
 						if liveStart {
 							writeCommandOut("live is already started.\n", projectPath, false)
 							continue
@@ -404,6 +488,122 @@ func main() {
 						err = os.Chdir(projectPath)
 						if err != nil {
 							writeCommandOut(err.Error()+"\n", projectPath, liveStart)
+							continue
+						}
+					} else if secondCommandValue == "upload" {
+						if liveStart {
+							writeCommandOut("you should stop live before.\n", projectPath, false)
+							continue
+						}
+
+						absPath, err := filepath.Abs(thirdCommandValue)
+						if err != nil {
+							writeCommandOut(err.Error()+"\n", projectPath, liveStart)
+							continue
+						}
+
+						if _, err := os.Stat(absPath); os.IsNotExist(err) {
+							writeCommandOut("File doesn't exists\n", projectPath, liveStart)
+							continue
+						}
+
+						projectPath = absPath
+
+						fmt.Println(projectPath)
+
+						// if _, err = os.Stat(gitDirPath); os.IsNotExist(err) {
+						// 	writeCommandOut(".git directory not found\n", projectPath, liveStart)
+						// 	continue
+						// }
+
+						_, err = git.PlainOpen(projectPath)
+						if err != nil {
+							writeCommandOut(err.Error()+"\n", projectPath, liveStart)
+							continue
+						}
+
+						writeCommandOut("preparing to upload ...\n", projectPath, liveStart)
+
+						projectName := filepath.Base(projectPath)
+
+						// gitDirPath := projectName + "/.git"
+
+						prevDir, err := filepath.Abs(".")
+						if err != nil {
+							writeCommandOut(err.Error()+"\n", projectPath, liveStart)
+							continue
+						}
+
+						err = os.Chdir(projectName)
+						if err != nil {
+							writeCommandOut(err.Error()+"\n", projectPath, liveStart)
+							continue
+						}
+
+						var buf bytes.Buffer
+						err = compress(".git", &buf)
+						if err != nil {
+							writeCommandOut("compress .git-directory failed\n", projectPath, liveStart)
+							continue
+						}
+
+						err = os.Chdir(prevDir)
+						if err != nil {
+							writeCommandOut(err.Error()+"\n", projectPath, liveStart)
+							continue
+						}
+
+						writeCommandOut("uploading ...\n", projectPath, liveStart)
+
+						// r := bytes.NewReader(buf)
+
+						req, err := http.NewRequest("POST", "https://localhost:3000/api/live/upload?projectName="+projectName, &buf)
+						req.Header.Set("Content-Type", "application/gzip")
+
+						client := &http.Client{}
+						res, err := client.Do(req)
+						if err != nil {
+							writeCommandOut(err.Error()+"\n", projectPath, liveStart)
+							continue
+						}
+						defer res.Body.Close()
+
+						bodyBytes, err := ioutil.ReadAll(res.Body)
+						if err != nil {
+							log.Fatal(err)
+						}
+
+						if res.StatusCode == http.StatusInternalServerError {
+							errorsResponse := ErrorsResponse{}
+							err = json.Unmarshal(bodyBytes, &errorsResponse)
+							if err != nil {
+								writeCommandOut(err.Error()+"\n", projectPath, liveStart)
+								continue
+							}
+							if len(errorsResponse) != 1 {
+								writeCommandOut("error response is invalid\n", projectPath, liveStart)
+								continue
+							}
+							writeCommandOut(errorsResponse[0].Message+"\n", projectPath, liveStart)
+							continue
+						} else if res.StatusCode == http.StatusOK {
+							uploadsResponse := UploadsResponse{}
+							err = json.Unmarshal(bodyBytes, &uploadsResponse)
+							if err != nil {
+								writeCommandOut(err.Error()+"\n", projectPath, liveStart)
+								continue
+							}
+
+							if len(uploadsResponse) != 1 {
+								writeCommandOut("upload response is invalid\n", projectPath, liveStart)
+								continue
+							}
+							uploadedURL := uploadsResponse[0].URL
+							writeCommandOut("done!\n", projectPath, liveStart)
+							writeCommandOut("you can see your live-coding in \""+uploadedURL+"\"\n", projectPath, liveStart)
+							continue
+						} else {
+							writeCommandOut("error code is unknown\n", projectPath, liveStart)
 							continue
 						}
 					} else {
