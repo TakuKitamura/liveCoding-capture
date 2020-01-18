@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	git "gopkg.in/src-d/go-git.v4"
@@ -29,6 +31,8 @@ type Commit struct {
 	ID          int    `bson:"id"`
 	// Files       map[string]string `bson:"files"`
 }
+
+type Commits []Commit
 
 var liveStart bool
 
@@ -77,8 +81,7 @@ func liveCommandUsage(projectPath string) {
 	writeCommandOut(out, projectPath, false)
 }
 
-func watch(r *git.Repository, projectPath string) error {
-	i := 0
+func watch(r *git.Repository, projectPath string, couterHTMLPath string) error {
 	w, err := r.Worktree()
 	if err != nil {
 		return err
@@ -141,24 +144,92 @@ func watch(r *git.Repository, projectPath string) error {
 				continue
 			}
 
-			commitStruct := Commit{
-				ProjectPath: projectPath,
-				ProjectName: "test",
-				Hash:        obj.Hash.String(),
-				Time:        commitTime,
-				ID:          i,
-				// Files:       files,
-			}
-			commit_collection := client.Database("liveCoding").Collection("commit")
-			_, err = commit_collection.InsertOne(ctx, commitStruct)
+			commitCollection := client.Database("liveCoding").Collection("commit")
+
+			findOptions := options.Find()
+			findOptions.SetSort(bson.D{{"id", -1}}).SetLimit(1)
+			projectFilter := bson.M{"project_path": projectPath}
+			cur, err := commitCollection.Find(ctx, projectFilter, findOptions)
 			if err != nil {
 				continue
 			}
 
-			i++
+			commitsStruct := Commits{}
+
+			err = cur.All(ctx, &commitsStruct)
+			if err != nil {
+				continue
+			}
+
+			var commitStruct Commit
+
+			if len(commitsStruct) == 1 {
+				commitStruct = Commit{
+					ProjectPath: projectPath,
+					ProjectName: filepath.Base(projectPath),
+					Hash:        obj.Hash.String(),
+					Time:        commitTime,
+					ID:          commitsStruct[0].ID + 1,
+				}
+
+				err, _ := createCounterHTML("ID: "+strconv.Itoa(commitsStruct[0].ID+1), couterHTMLPath)
+				if err != nil {
+					return err
+				}
+			} else {
+				commitStruct = Commit{
+					ProjectPath: projectPath,
+					ProjectName: filepath.Base(projectPath),
+					Hash:        obj.Hash.String(),
+					Time:        commitTime,
+					ID:          0,
+				}
+
+				err, _ := createCounterHTML("ID: 0", couterHTMLPath)
+				if err != nil {
+					fmt.Println(err)
+					return err
+				}
+			}
+
+			_, err = commitCollection.InsertOne(ctx, commitStruct)
+			if err != nil {
+				continue
+			}
 
 		}
 	}
+}
+
+func createCounterHTML(message string, path string) (error, string) {
+	// tmpFile, err := ioutil.TempFile("counter.html", "counter.html")
+	// if err != nil {
+	// 	return err
+	// }
+	// tmpPath := tmpFile.Name()
+	// fmt.Println(tmpPath)
+
+	// fmt.Println(message, path)
+	tmpPath := ""
+
+	if path == "" {
+		dir, err := ioutil.TempDir("", "")
+		if err != nil {
+			return err, ""
+		}
+		tmpPath = filepath.Join(dir, "counter.html")
+	} else {
+		tmpPath = path
+	}
+
+	counterHTML := `<title>LiveCoding</title><style type="text/css">html,body{width:100%;height:100%}html{display:table}body{display:table-cell;text-align:center;vertical-align:middle}#message{font-size:10em}</style><p id="message">` + message + `</p> <script>setTimeout(location.reload(),1000);</script>`
+
+	err := ioutil.WriteFile(tmpPath, []byte(counterHTML), 0666)
+	if err != nil {
+		return err, ""
+	}
+
+	return nil, tmpPath
 }
 
 func main() {
@@ -168,7 +239,12 @@ func main() {
 	liveStart = false
 
 	fmt.Println("\x1b[32mWelcome Live Coding Capture! (v0.0.1)\x1b[0m")
+	err, couterHTMLPath := createCounterHTML("実況準備中", "")
+	if err != nil {
+		log.Fatal(err)
+	}
 
+	fmt.Println("Please open \"" + couterHTMLPath + "\" in your browser.")
 	for {
 		pwd, err := os.Getwd()
 		if err != nil {
@@ -277,7 +353,7 @@ func main() {
 						}
 
 						projectPath = absPath
-						
+
 						r, err := git.PlainInit(projectPath, false)
 						if err != nil {
 							writeCommandOut(err.Error()+"\n", projectPath, liveStart)
@@ -286,7 +362,7 @@ func main() {
 
 						liveStart = true
 
-						go watch(r, projectPath)
+						go watch(r, projectPath, couterHTMLPath)
 
 						err = os.Chdir(projectPath)
 						if err != nil {
@@ -323,7 +399,7 @@ func main() {
 
 						liveStart = true
 
-						go watch(r, projectPath)
+						go watch(r, projectPath, couterHTMLPath)
 
 						err = os.Chdir(projectPath)
 						if err != nil {
