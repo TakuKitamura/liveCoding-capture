@@ -166,7 +166,14 @@ func watch(r *git.Repository, projectPath string, couterHTMLPath string) error {
 		// fmt.Println(status.String())
 
 		if len(status) != 0 {
-			err = w.AddGlob(".")
+			// err = w.AddGlob(".")
+			// if err != nil {
+			// 	fmt.Println(err)
+			// 	return err
+			// }
+
+			cmd := exec.Command("git", "add", ".")
+			err := cmd.Run()
 			if err != nil {
 				fmt.Println(err)
 				return err
@@ -557,7 +564,7 @@ func main() {
 
 						// r := bytes.NewReader(buf)
 
-						req, err := http.NewRequest("POST", "https://localhost:3000/api/live/upload?projectName="+projectName, &buf)
+						req, err := http.NewRequest("POST", "https://live-coding-api.takukitamura.com/api/live/upload?projectName="+projectName, &buf)
 						req.Header.Set("Content-Type", "application/gzip")
 
 						client := &http.Client{}
@@ -572,7 +579,6 @@ func main() {
 						if err != nil {
 							log.Fatal(err)
 						}
-
 						if res.StatusCode == http.StatusInternalServerError {
 							errorsResponse := ErrorsResponse{}
 							err = json.Unmarshal(bodyBytes, &errorsResponse)
@@ -589,6 +595,7 @@ func main() {
 						} else if res.StatusCode == http.StatusOK {
 							uploadsResponse := UploadsResponse{}
 							err = json.Unmarshal(bodyBytes, &uploadsResponse)
+							fmt.Println(uploadsResponse)
 							if err != nil {
 								writeCommandOut(err.Error()+"\n", projectPath, liveStart)
 								continue
