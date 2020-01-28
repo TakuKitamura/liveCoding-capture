@@ -516,7 +516,7 @@ func main() {
 
 						projectPath = absPath
 
-						fmt.Println(projectPath)
+						// fmt.Println(projectPath)
 
 						// if _, err = os.Stat(gitDirPath); os.IsNotExist(err) {
 						// 	writeCommandOut(".git directory not found\n", projectPath, liveStart)
@@ -595,7 +595,7 @@ func main() {
 						} else if res.StatusCode == http.StatusOK {
 							uploadsResponse := UploadsResponse{}
 							err = json.Unmarshal(bodyBytes, &uploadsResponse)
-							fmt.Println(uploadsResponse)
+							// fmt.Println(uploadsResponse)
 							if err != nil {
 								writeCommandOut(err.Error()+"\n", projectPath, liveStart)
 								continue
