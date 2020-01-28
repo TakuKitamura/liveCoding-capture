@@ -4,7 +4,7 @@ Version 0.1
 ## work
 ### 円周率を計算している例
 
-Webサイトを開いたら､一番下のバーを動かしてみてください｡
+Webサイトを開いたら､一番下のバーを動かしてみてください｡動画に表示されているIDと対応しています｡
 
 動画 https://drive.google.com/file/d/1Nw1GjTHxQYJ7kNT79moPbDwlltI6Z0gI/view?usp=sharing
 
