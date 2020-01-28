@@ -4,6 +4,8 @@ Version 0.1
 ## work
 ### 円周率を計算している例
 
+Webサイトを開いたら､一番下のバーを動かしてみてください｡
+
 動画 https://drive.google.com/file/d/1Nw1GjTHxQYJ7kNT79moPbDwlltI6Z0gI/view?usp=sharing
 
 Webサイト https://live-coding.takukitamura.com/?id=qikdVYiv1PeX7nL09DkV
@@ -12,7 +14,7 @@ Webサイト https://live-coding.takukitamura.com/?id=qikdVYiv1PeX7nL09DkV
 
 動画 https://www.youtube.com/watch?v=llXQKdGGk7M
 
-Webサイト https://live-coding.takukitamura.com/?id=dj9lWEZK9BiSvYmDf0gA
+Webサイト(読み込みが少し遅いです) https://live-coding.takukitamura.com/?id=dj9lWEZK9BiSvYmDf0gA
 
 ## dependency
 - Golang
