@@ -1,10 +1,19 @@
 # liveCoding-capture
-Version 0.0.1
-もうすぐAPIを公開する予定｡
+Version 0.1
+
+## work
+円周率を計算している例
+動画 https://drive.google.com/file/d/1Nw1GjTHxQYJ7kNT79moPbDwlltI6Z0gI/view?usp=sharing
+Webサイト https://live-coding.takukitamura.com/?id=dj9lWEZK9BiSvYmDf0gA
+
+【自作言語】スイーツ絵文字で円周率計算してみた Part1 文字列出力編
+動画 https://www.youtube.com/watch?v=llXQKdGGk7M
+Webサイト https://live-coding.takukitamura.com/?id=dj9lWEZK9BiSvYmDf0gA
 
 ## dependency
 - Golang
 - dep (go dependency management tool)
+- git (いずれ必要なくなるはずです｡)
 
 ## install
 ```sh
