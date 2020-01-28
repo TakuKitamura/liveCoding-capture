@@ -16,6 +16,10 @@ Webサイト https://live-coding.takukitamura.com/?id=qikdVYiv1PeX7nL09DkV
 
 Webサイト(読み込みが少し遅いです) https://live-coding.takukitamura.com/?id=dj9lWEZK9BiSvYmDf0gA
 
+## 動作確認済み
+- Mac
+- Amaozon Linux
+
 ## dependency
 - Golang
 - dep (go dependency management tool)
