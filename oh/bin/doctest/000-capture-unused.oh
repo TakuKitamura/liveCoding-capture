@@ -1,0 +1,13 @@
+#!/usr/bin/env oh
+
+touch "Name With Spaces"
+
+ls Name*
+
+for `(ls Name*): method (File) = {
+    cat $File
+}
+
+rm "Name With Spaces"
+
+ls Name*
